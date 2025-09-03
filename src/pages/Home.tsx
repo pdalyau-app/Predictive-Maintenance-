@@ -1,5 +1,5 @@
 // src/pages/Home.tsx
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { assets, alerts } from "../data/assets";
 import { recommendations } from "../data/recommendations";
@@ -80,6 +80,9 @@ export default function Home() {
   const [typeFilter, setTypeFilter] = useState<AssetType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<Health | "all">("all");
 
+  // ref to scroll to Assets list on donut click
+  const assetsListRef = useRef<HTMLDivElement | null>(null);
+
   // modals
   const [insightFor, setInsightFor] = useState<Asset | null>(null);
   const [workOrderFor, setWorkOrderFor] = useState<Asset | null>(null);
@@ -136,7 +139,7 @@ export default function Home() {
     },
   ];
 
-  // Top Risk Assets (simple risk: Critical first, then Warning by lowest health)
+  // Top Risk Assets
   const topRisk = useMemo(() => {
     const severityRank = (s: Health) =>
       s === "Critical" ? 2 : s === "Warning" ? 1 : 0;
@@ -156,6 +159,24 @@ export default function Home() {
     padding: 16,
   };
   const lastPoint = (a: Asset) => a.trend[a.trend.length - 1];
+
+  // donut → filter + scroll logic
+  const applyStatusFromDonut = (s: Health) => {
+    setStatusFilter((prev) => (prev === s ? "all" : s));
+    setTimeout(() => {
+      assetsListRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  };
+
+  // ---------- NEW: Top Drivers (contribution bars) ----------
+  const topDrivers = [
+    { label: "Vibration spikes", weight: 40 },
+    { label: "ΔT vs Ambient", weight: 30 },
+    { label: "Current imbalance", weight: 20 },
+    { label: "Alert frequency", weight: 10 },
+  ] as const;
+  const totalDriverWeight = topDrivers.reduce((s, d) => s + d.weight, 0);
+  // ----------------------------------------------------------
 
   return (
     <div style={{ padding: "16px 16px 32px" }}>
@@ -345,7 +366,7 @@ export default function Home() {
         >
           {/* Left: Assets list */}
           <div style={{ gridColumn: "span 2" }}>
-            <div style={{ ...card }}>
+            <div ref={assetsListRef} style={{ ...card }}>
               <div style={{ fontWeight: 700, marginBottom: 8 }}>Assets</div>
               <div style={{ borderTop: "1px solid #f1f5f9" }} />
               {filtered.map((a) => {
@@ -554,7 +575,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Right: Health Summary donut + legend + drivers */}
+          {/* Right: Health Summary donut + legend + Top Drivers bars */}
           <div style={{ ...card }}>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>
               Health Summary
@@ -570,9 +591,25 @@ export default function Home() {
                     outerRadius={85}
                     paddingAngle={2}
                   >
-                    {pieData.map((d, i) => (
-                      <Cell key={i} fill={d.color} />
-                    ))}
+                    {pieData.map((d, i) => {
+                      const selected =
+                        statusFilter !== "all" &&
+                        (d.name as Health) === statusFilter;
+                      const dimmed =
+                        statusFilter !== "all" &&
+                        (d.name as Health) !== statusFilter;
+                      return (
+                        <Cell
+                          key={i}
+                          fill={d.color}
+                          stroke={selected ? "#0f172a" : "#fff"}
+                          strokeWidth={selected ? 2 : 1}
+                          cursor="pointer"
+                          opacity={dimmed ? 0.45 : 1}
+                          onClick={() => applyStatusFromDonut(d.name as Health)}
+                        />
+                      );
+                    })}
                   </Pie>
                   <Tooltip />
                 </PieChart>
@@ -586,44 +623,98 @@ export default function Home() {
                 marginTop: 6,
               }}
             >
-              {pieData.map((d) => (
-                <div
-                  key={d.name}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    fontSize: 13,
-                  }}
-                >
-                  <span
+              {pieData.map((d) => {
+                const selected =
+                  statusFilter !== "all" &&
+                  (d.name as Health) === statusFilter;
+                const dimmed =
+                  statusFilter !== "all" &&
+                  (d.name as Health) !== statusFilter;
+                return (
+                  <button
+                    key={d.name}
+                    onClick={() => applyStatusFromDonut(d.name as Health)}
                     style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 2,
-                      background: d.color,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 13,
+                      background: selected ? "#f1f5f9" : "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 8,
+                      padding: "6px 8px",
+                      opacity: dimmed ? 0.65 : 1,
+                      cursor: "pointer",
                     }}
-                  />
-                  <span style={{ flex: 1 }}>{d.name}</span>
-                  <b>{d.value}</b>
-                </div>
-              ))}
+                  >
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 2,
+                        background: d.color,
+                      }}
+                    />
+                    <span style={{ flex: 1 }}>{d.name}</span>
+                    <b>{d.value}</b>
+                  </button>
+                );
+              })}
             </div>
+
+            {/* NEW: Top Drivers contribution bars */}
             <div style={{ fontWeight: 700, marginTop: 10, marginBottom: 6 }}>
               Top Drivers
             </div>
-            <div
-              style={{
-                color: "#334155",
-                fontSize: 13,
-                display: "grid",
-                gap: 4,
-              }}
-            >
-              <div>Vibration spikes (weighted 40%)</div>
-              <div>ΔT vs Ambient (30%)</div>
-              <div>Current imbalance (20%)</div>
-              <div>Alert frequency (10%)</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {topDrivers.map((d) => {
+                const pct = Math.round((d.weight / totalDriverWeight) * 100);
+                const barColor =
+                  d.label === "Vibration spikes"
+                    ? "#ef4444"
+                    : d.label.startsWith("ΔT")
+                    ? "#f59e0b"
+                    : d.label === "Current imbalance"
+                    ? "#3b82f6"
+                    : "#10b981";
+                return (
+                  <div key={d.label} style={{ display: "grid", gap: 6 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        fontSize: 12,
+                        color: "#475569",
+                      }}
+                    >
+                      <span>{d.label}</span>
+                      <span style={{ fontWeight: 700 }}>{pct}%</span>
+                    </div>
+                    <div
+                      style={{
+                        height: 10,
+                        borderRadius: 999,
+                        background: "#f1f5f9",
+                        border: "1px solid #e2e8f0",
+                        overflow: "hidden",
+                      }}
+                      role="progressbar"
+                      aria-label={`${d.label} contribution`}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={pct}
+                    >
+                      <div
+                        style={{
+                          width: `${pct}%`,
+                          height: "100%",
+                          background: barColor,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
